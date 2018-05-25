@@ -8,7 +8,7 @@ Currently, it supports replays that start immediately, as well as replays that w
 hatTAS does not make any lasting modifications to the game. Rather, it patches it in memory. If it messes up anything, you should be able to restart the game and try again.
 
 ## Notes
-This program is very early in development, and thus is not ready for general usage yet. It has many compatability issues.
+This program is very early in development, and thus is not ready for general usage yet. It has many compatibility issues.
 
 **Note**: the game only accepts inputs if it's in focus.
 
