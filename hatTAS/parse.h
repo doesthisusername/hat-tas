@@ -61,10 +61,15 @@ struct pov_help {
 	bool left = false;
 };
 
+struct aux_data {
+	float speed = 60.f;
+};
+
 struct input_report {
 	buttons_report buttons;
 	analog_report analog;
 	pov_help pov;
+	aux_data aux;
 };
 
 bool starts_with(const char* input, const char* search);

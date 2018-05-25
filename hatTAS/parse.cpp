@@ -124,11 +124,21 @@ input_report* parse_tas(const char* filename, tas_metadata* meta_out) {
 			else if(starts_with(token, "RT")) tmp_report.buttons.rt = !negated ? 80 : 0;
 			else if(starts_with(token, "START")) tmp_report.buttons.start = !negated ? 80 : 0;
 			else if(starts_with(token, "SELECT")) tmp_report.buttons.select = !negated ? 80 : 0;
+
 			// dpad
 			else if(starts_with(token, "UP")) tmp_report.pov.up = !negated;
 			else if(starts_with(token, "RIGHT")) tmp_report.pov.right = !negated;
 			else if(starts_with(token, "DOWN")) tmp_report.pov.down = !negated;
 			else if(starts_with(token, "LEFT")) tmp_report.pov.left = !negated;
+
+			// analog -- auto-detects number base (or at least it should)
+			else if(starts_with(token, "LX")) tmp_report.analog.lx = !negated ? strtol(token + 3, NULL, NULL) : AXIS_MAX / 2;
+			else if(starts_with(token, "LY")) tmp_report.analog.ly = !negated ? strtol(token + 3, NULL, NULL) : AXIS_MAX / 2;
+			else if(starts_with(token, "RX")) tmp_report.analog.rx = !negated ? strtol(token + 3, NULL, NULL) : AXIS_MAX / 2;
+			else if(starts_with(token, "RY")) tmp_report.analog.ry = !negated ? strtol(token + 3, NULL, NULL) : AXIS_MAX / 2;
+
+			// commands
+			else if(starts_with(token, "SPEED")) tmp_report.aux.speed = !negated ? strtof(token + 6, NULL) * 60.f : 60.f;
 
 			// probably really inefficient
 			long hat;
@@ -151,12 +161,6 @@ input_report* parse_tas(const char* filename, tas_metadata* meta_out) {
 			else hat = -1; // neutral
 
 			tmp_report.analog.hat = hat;
-
-			// analog -- auto-detects number base (or at least it should)
-			if(starts_with(token, "LX")) tmp_report.analog.lx = !negated ? strtol(token + 3, NULL, NULL) : AXIS_MAX / 2;
-			else if(starts_with(token, "LY")) tmp_report.analog.ly = !negated ? strtol(token + 3, NULL, NULL) : AXIS_MAX / 2;
-			else if(starts_with(token, "RX")) tmp_report.analog.rx = !negated ? strtol(token + 3, NULL, NULL) : AXIS_MAX / 2;
-			else if(starts_with(token, "RY")) tmp_report.analog.ry = !negated ? strtol(token + 3, NULL, NULL) : AXIS_MAX / 2;
 		}
 		
 		// finish up the frame line

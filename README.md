@@ -47,10 +47,13 @@ Note that `UP`, `RIGHT`, `DOWN`, `LEFT` have some peculiarities, in that they do
 
 There are also some special input events - the analog sticks. They have the format `axis:value`. `~` without a value puts it back to neutral. The available values are any number between `0` and `65535`, `0` being left/up, and `65535` being right/down. The available analog axes are `LX`, `LY`, `RX`, `RY`.
 
+There is also a special command to change the playback speed, called `SPEED`. Set it like you'd set an axis, with the input number being the speed multiplier compared to default 60. Useful for developing the replay. Note that the max playback speed is limited by your PC specs, and that setting it high may cause desyncs.
+
 Example body:
 ```
 000010: LY:0 X       // walk forward and attack
 000045: ~LY ~X       // go neutral on LY, and let go of attack
 000046: X LEFT       // attack once more, while switching hat left
-000100: DOWN         // blow a kiss
+000070: SPEED:2      // set playback rate to 2x speed
+000100: DOWN ~SPEED  // blow a kiss, and go back to 60 FPS
 ```
