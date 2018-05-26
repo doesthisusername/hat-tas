@@ -28,6 +28,7 @@ struct tas_metadata {
 	char* name = "Generic TAS";
 	tas_type type = INDIVIDUAL;
 	long length;
+	bool changes_speed = false;
 };
 
 // mimicking how the game does it, so we can do fewer writes

@@ -138,9 +138,12 @@ input_report* parse_tas(const char* filename, tas_metadata* meta_out) {
 			else if(starts_with(token, "RY")) tmp_report.analog.ry = !negated ? strtol(token + 3, NULL, NULL) : AXIS_MAX / 2;
 
 			// commands
-			else if(starts_with(token, "SPEED")) tmp_report.aux.speed = !negated ? strtof(token + 6, NULL) * 60.f : 60.f;
+			else if(starts_with(token, "SPEED")) {
+				tmp_report.aux.speed = !negated ? strtof(token + 6, NULL) * 60.f : 60.f;
+				meta_out->changes_speed = true; // try to optimize the WriteProcessMemory() calls a little
+			}
 
-			// probably really inefficient
+			// probably really inefficient, doesn't matter too much, as we're not playing while parsing
 			long hat;
 			if(tmp_report.pov.up) {
 				if(tmp_report.pov.right) hat = 4500;
