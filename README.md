@@ -55,5 +55,5 @@ Example body:
 000045: ~LY ~X       // go neutral on LY, and let go of attack
 000046: X LEFT       // attack once more, while switching hat left
 000070: SPEED:2      // set playback rate to 2x speed
-000100: DOWN ~SPEED  // blow a kiss, and go back to 60 FPS
+000100: DOWN ~SPEED  // blow a kiss, and go back to 1x speed
 ```
