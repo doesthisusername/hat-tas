@@ -55,6 +55,7 @@ struct analog_report {
 	long hat = -1;
 };
 
+// game doesn't do this, I just do it because I can't figure out how to calculate correct pov value otherwise
 struct pov_help {
 	bool up = false;
 	bool right = false;
@@ -62,6 +63,7 @@ struct pov_help {
 	bool left = false;
 };
 
+// extra data not related to inputs
 struct aux_data {
 	float speed = 60.f;
 };

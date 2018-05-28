@@ -16,6 +16,11 @@ This program is very early in development, and thus is not ready for general usa
 
 **Note**: this program only supports a single version of the game, due to pointers in the executable likely changing. It's an old version of the modding beta. Please visit the Boop Troop (AHiT speedrunning) discord server for more information.
 
+## Usage
+To use this program, open the command line in the current directory, and run `hatTAS.exe <movie.htas>`. For example, `hatTAS.exe sample.htas`. If using an immediate type TAS, remember to give the game focus quickly, or the inputs won't go through.
+
+If you want to break out of the program while the TAS is playing, press the `escape` button.
+
 ## .htas file format
 .htas is a custom extension for replay files, which are specific to this tool. `sample.htas` contains a short example. I will also detail the format here.
 
