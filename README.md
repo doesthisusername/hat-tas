@@ -3,7 +3,7 @@
 
 The goal for this project is to be able to run TAS replay files for A Hat in Time.
 
-Currently, it supports replays that start immediately, as well as replays that wait for the act timer.
+Currently, it supports replays that start immediately, as well as replays that wait for the act timer to start. There is experimental support for replays that wait for the game timer to resume.
 
 hatTAS does not make any lasting modifications to the game. Rather, it patches it in memory. If it messes up anything, you should be able to restart the game and try again.
 
@@ -27,9 +27,9 @@ If you want to break out of the program while the TAS is playing, press the `esc
 Comments are written with two slashes (`//`), and comment out the remainder of the line. Comments on header lines are not supported currently.
 
 ### Header
-The header consist of key-value pairs. There are currently three different keys possible, to specify metadata. Each key **must** be followed by a colon and space, with the value immediately following. Keys and types are case-sensitive. The currently available keys are: `name`, `type`, `length`.
+The header consists of key-value pairs. There are currently three different keys possible, to specify metadata. Each key **must** be followed by a colon and space, with the value immediately following. Keys and types are case-sensitive. The currently available keys are: `name`, `type`, `length`.
 
-The currently available types are `IL` and `immediate`. The `IL` type waits for the act timer to start counting up from zero, where it will then start. The `immediate` type will start the inputs immediately.
+The currently available types are `IL`, `immediate`, and `fullgame` (experimental). The `IL` type waits for the act timer to start counting up from zero, where it will then start. The `immediate` type will start the inputs immediately. The `fullgame` type waits for the game timer to resume from a paused state.
 
 Example header:
    
@@ -42,7 +42,7 @@ length: 240
 The above would specify a replay with the name `My cool TAS`, an `IL` type, and a length of `240` frames.
 
 ### Body
-The body consists of a list of frame numbers, each with a list of *input events*. The frame numbers work like the header keys above, in that they need to be immediately followed by a colon and space. You can specify input events after the colon and space. Frame numbers have, by convention, leading `0` padding, such that it is six characters long.
+The body consists of a list of frame numbers, each with a list of *input events*. The frame numbers work like the header keys above, in that they need to be immediately followed by a colon and space. You can specify input events after the colon and space. Frame numbers have, by convention, leading `0` padding, such that they are six characters long.
 
 All input events are written in all-caps and must have spaces around them, such that they can be delimited. The available regular input events are `A`, `B`, `X`, `Y`, `LB`, `RB`, `LT`, `RT`, `START`, `SELECT`, `UP`, `RIGHT`, `DOWN`, `LEFT`.
 
