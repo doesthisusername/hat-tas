@@ -6,7 +6,7 @@
 
 #define HAT_EXE_NAME L"HatinTimeGame.exe"
 #define DINPUT_DLL_NAME L"DINPUT8.dll"
-// divide by 4 because reasons
+// divide by 4 because of pointer arithmetic
 #define PIB_GET_INTERFACE_OFFSET (0x89ABF0 / 4)
 #define GETDF_DI_JOYSTICK_OFFSET (0xFCB0 / 4)
 
@@ -25,7 +25,7 @@ const BYTE nop_delta_buf[10] = { 0x79, 0x00, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
 const double desired_framerate = 1.0 / 60.0; // desired delta time
 float original_fps = 60.f;
 
-// breakpoint thing
+// breakpoint code
 const BYTE interrupt_op = 0xCC;
 const BYTE orig_tick = 0x48;
 
@@ -87,7 +87,6 @@ int main(int argc, char* argv[]) {
 		_tprintf(L"Failed to create snapshot of modules!\nExiting...\n");
 		return 0;
 	}
-
 	MODULEENTRY32 entry;
 	entry.dwSize = sizeof(MODULEENTRY32);
 	if(Module32First(snapshot, &entry)) {
@@ -123,10 +122,13 @@ int main(int argc, char* argv[]) {
 	bool started = false;
 	int i = 0;
 
-	int old_frame_count = 0;
-	int frame_count = 0;
-	double old_act_time = -1;
+	double game_time = -1;
+	double old_game_time = -1;
 	double act_time = -1;
+	double old_act_time = -1;
+
+	bool timer_paused = false;
+	bool old_timer_paused = false;
 
 	BYTE* analog_address = NULL;
 	BYTE* buttons_address = NULL;
@@ -145,6 +147,8 @@ int main(int argc, char* argv[]) {
 		WaitForDebugEvent(&debug_event, INFINITE);
 
 		SuspendThread(thread);
+
+		// handle breakpoint, else tell the game to handle it by itself
 		if(debug_event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT && debug_event.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_BREAKPOINT && debug_event.u.Exception.ExceptionRecord.ExceptionAddress == base_address + TICK_CODE_OFFSET) {
 			GetThreadContext(thread, &context);
 			context.Rip -= 1;
@@ -160,13 +164,17 @@ int main(int argc, char* argv[]) {
 		** breakpoint hit!
 		*/
 
+		old_timer_paused = timer_paused; // like in ASL
+		ReadProcessMemory(process, base_address + TIMER_OFFSET + (0x10 / 4), &timer_paused, sizeof(timer_paused), NULL); // read timer status
+		old_game_time = game_time; // like in ASL
+		ReadProcessMemory(process, base_address + TIMER_OFFSET + (0x34 / 4), &game_time, sizeof(game_time), NULL); // read game time
 		old_act_time = act_time; // like in ASL
-		ReadProcessMemory(process, base_address + TIMER_OFFSET + (0x3C / 4), &act_time, 8, NULL); // read act time
+		ReadProcessMemory(process, base_address + TIMER_OFFSET + (0x3C / 4), &act_time, sizeof(act_time), NULL); // read act time
 	
 		// TODO: implement fullgame type
-		// start if IL type, and act timer just started, OR start immediately if type is immediate
+		// start if fullgame type, and game timer just started, OR start if IL type, and act timer just started from zero, OR start immediately if type is immediate
 		// !started in the beginning should make it not evaluate all the conditions once TAS has started
-		if(!started && (meta.type == INDIVIDUAL && act_time > 0 && old_act_time == 0) || (meta.type == IMMEDIATE)) {
+		if(!started && (meta.type == FULLGAME && game_time > 0 && !timer_paused && old_timer_paused) || (meta.type == INDIVIDUAL && act_time > 0 && old_act_time == 0) || (meta.type == IMMEDIATE)) {
 			// write the input code patch on starting
 			WriteProcessMemory(process, dinput_address + ANALOG_WRITE_CODE_OFFSET, nop_analog_buf, sizeof(nop_analog_buf), NULL); // code
 			WriteProcessMemory(process, dinput_address + GETDF_DI_JOYSTICK_OFFSET + BUTTON_WRITE_CODE_OFFSET, nop_button_buf, sizeof(nop_button_buf), NULL); // code
@@ -178,9 +186,9 @@ int main(int argc, char* argv[]) {
 			analog_address = resolve_ptr(analog_address + 0x8); // analog_address now points to the right place
 			buttons_address = analog_address + 0xE4; // buttons
 
-			// resolve and read current FPS value
+			// resolve and read current FPS value, so we can restore it at end-of-TAS
 			fps_address = resolve_ptr(base_address + FPS_PTR_OFFSET) + 0x710;
-			ReadProcessMemory(process, fps_address, &original_fps, sizeof(float), NULL); // so we can restore it at end-of-TAS
+			ReadProcessMemory(process, fps_address, &original_fps, sizeof(original_fps), NULL);
 
 			// set start flag
 			started = true;
@@ -197,7 +205,8 @@ int main(int argc, char* argv[]) {
 			continue;
 		}
 
-		if(act_time == old_act_time) {
+		// reduces desyncs, not sure why this happens though
+		if(game_time == old_game_time) {
 			WriteProcessMemory(process, base_address + TICK_CODE_OFFSET, &orig_tick, sizeof(orig_tick), NULL);
 			ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId, DBG_CONTINUE);
 			ResumeThread(thread);
@@ -224,7 +233,7 @@ int main(int argc, char* argv[]) {
 
 	// cleanup
 	WriteProcessMemory(process, dinput_address + ANALOG_WRITE_CODE_OFFSET, orig_analog_buf, sizeof(orig_analog_buf), NULL); // put original back so dinput device analog sticks work again
-	WriteProcessMemory(process, dinput_address + GETDF_DI_JOYSTICK_OFFSET + BUTTON_WRITE_CODE_OFFSET, orig_button_buf, sizeof(orig_button_buf), NULL); // put original back to dinput device buttons work again
+	WriteProcessMemory(process, dinput_address + GETDF_DI_JOYSTICK_OFFSET + BUTTON_WRITE_CODE_OFFSET, orig_button_buf, sizeof(orig_button_buf), NULL); // put original back so dinput device buttons work again
 	WriteProcessMemory(process, fps_address, &original_fps, sizeof(original_fps), NULL); // write back original fps value
 
 	DebugActiveProcessStop(pid);

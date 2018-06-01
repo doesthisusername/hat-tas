@@ -45,7 +45,6 @@ input_report* parse_tas(const char* filename, tas_metadata* meta_out) {
 		// 0x0A = \n
 		if(character == 0x0A) {
 			file_data[line_num][column_num] = (char)0x00; // null terminate
-			//printf("%s\n", file_data[line_num]); // debug print
 			line_num++; // new line
 			column_num = -1; // new line, so set column back
 			continue;
@@ -114,16 +113,16 @@ input_report* parse_tas(const char* filename, tas_metadata* meta_out) {
 			}
 			// it's being dumb, only starts_with() works...
 			// buttons 
-			if(starts_with(token, "A")) tmp_report.buttons.a = !negated ? 80 : 0;
-			else if(starts_with(token, "B")) tmp_report.buttons.b = !negated ? 80 : 0;
-			else if(starts_with(token, "X")) tmp_report.buttons.x = !negated ? 80 : 0;
-			else if(starts_with(token, "Y")) tmp_report.buttons.y = !negated ? 80 : 0;
-			else if(starts_with(token, "LB")) tmp_report.buttons.lb = !negated ? 80 : 0;
-			else if(starts_with(token, "RB")) tmp_report.buttons.rb = !negated ? 80 : 0;
-			else if(starts_with(token, "LT")) tmp_report.buttons.lt = !negated ? 80 : 0;
-			else if(starts_with(token, "RT")) tmp_report.buttons.rt = !negated ? 80 : 0;
-			else if(starts_with(token, "START")) tmp_report.buttons.start = !negated ? 80 : 0;
-			else if(starts_with(token, "SELECT")) tmp_report.buttons.select = !negated ? 80 : 0;
+			if(starts_with(token, "A")) tmp_report.buttons.a = !negated ? 0x80 : 0;
+			else if(starts_with(token, "B")) tmp_report.buttons.b = !negated ? 0x80 : 0;
+			else if(starts_with(token, "X")) tmp_report.buttons.x = !negated ? 0x80 : 0;
+			else if(starts_with(token, "Y")) tmp_report.buttons.y = !negated ? 0x80 : 0;
+			else if(starts_with(token, "LB")) tmp_report.buttons.lb = !negated ? 0x80 : 0;
+			else if(starts_with(token, "RB")) tmp_report.buttons.rb = !negated ? 0x80 : 0;
+			else if(starts_with(token, "LT")) tmp_report.buttons.lt = !negated ? 0x80 : 0;
+			else if(starts_with(token, "RT")) tmp_report.buttons.rt = !negated ? 0x80 : 0;
+			else if(starts_with(token, "START")) tmp_report.buttons.start = !negated ? 0x80 : 0;
+			else if(starts_with(token, "SELECT")) tmp_report.buttons.select = !negated ? 0x80 : 0;
 
 			// dpad
 			else if(starts_with(token, "UP")) tmp_report.pov.up = !negated;
