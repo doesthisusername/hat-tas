@@ -122,6 +122,7 @@ int main(int argc, char* argv[]) {
 	bool started = false;
 	int i = 0;
 
+	double started_time = -1; // for giving an accurate ending time
 	double game_time = -1;
 	double old_game_time = -1;
 	double act_time = -1;
@@ -163,7 +164,7 @@ int main(int argc, char* argv[]) {
 		/*
 		** breakpoint hit!
 		*/
-
+		
 		old_timer_paused = timer_paused; // like in ASL
 		ReadProcessMemory(process, base_address + TIMER_OFFSET + (0x10 / 4), &timer_paused, sizeof(timer_paused), NULL); // read timer status
 		old_game_time = game_time; // like in ASL
@@ -172,12 +173,13 @@ int main(int argc, char* argv[]) {
 		ReadProcessMemory(process, base_address + TIMER_OFFSET + (0x3C / 4), &act_time, sizeof(act_time), NULL); // read act time
 	
 		// TODO: implement fullgame type
-		// start if fullgame type, and game timer just started, OR start if IL type, and act timer just started from zero, OR start immediately if type is immediate
+		// start if fullgame type, and game timer just started/game timer just resumed, OR start if IL type, and act timer just started from zero, OR start immediately if type is immediate
 		// !started in the beginning should make it not evaluate all the conditions once TAS has started
-		if(!started && (meta.type == FULLGAME && game_time > 0 && !timer_paused && old_timer_paused) || (meta.type == INDIVIDUAL && act_time > 0 && old_act_time == 0) || (meta.type == IMMEDIATE)) {
+		if(!started && (meta.type == FULLGAME && game_time > 0 && (old_game_time == 0 || (!timer_paused && old_timer_paused)) || (meta.type == INDIVIDUAL && act_time > 0 && old_act_time == 0) || (meta.type == IMMEDIATE))) {
 			// write the input code patch on starting
 			WriteProcessMemory(process, dinput_address + ANALOG_WRITE_CODE_OFFSET, nop_analog_buf, sizeof(nop_analog_buf), NULL); // code
 			WriteProcessMemory(process, dinput_address + GETDF_DI_JOYSTICK_OFFSET + BUTTON_WRITE_CODE_OFFSET, nop_button_buf, sizeof(nop_button_buf), NULL); // code
+			started_time = game_time - desired_framerate; // for giving a duration at the end message, subtract a frame, as start time gets set a frame into the replay
 
 			// pointer path traversal																													 
 			analog_address = resolve_ptr(base_address + INPUT_DATA_PTR_OFFSET);
@@ -239,7 +241,7 @@ int main(int argc, char* argv[]) {
 	DebugActiveProcessStop(pid);
 	CloseHandle(thread);
 	CloseHandle(process);
-	_tprintf(L"Done at %lf!\n", act_time);
+	_tprintf(L"Done in %lf!\n", meta.type == INDIVIDUAL ? act_time : game_time - started_time);
 
 	return 0;
 }
