@@ -27,9 +27,15 @@ If you want to break out of the program while the TAS is playing, press the `esc
 Comments are written with two slashes (`//`), and comment out the remainder of the line. Comments on header lines are not supported currently.
 
 ### Header
-The header consists of key-value pairs. There are currently three different keys possible, to specify metadata. Each key **must** be followed by a colon and space, with the value immediately following. Keys and types are case-sensitive. The currently available keys are: `name`, `type`, `length`.
+The header consists of key-value pairs. There are currently three different keys possible, to specify metadata. Each key **must** be followed by a colon and space, with the value immediately following. Keys and types are case-sensitive. The currently available keys are: `name`, `type`, `length`, `fps`.
 
-The currently available types are `IL`, `immediate`, and `fullgame` (experimental). The `IL` type waits for the act timer to start counting up from zero, where it will then start. The `immediate` type will start the inputs immediately. The `fullgame` type waits for the game timer to resume from a paused state.
+The `name` key specifies the name of the TAS replay. Default is `Generic TAS`.
+
+The `type` key specifies the type of TAS replay. The currently available types are `IL`, `immediate`, and `fullgame` (experimental). The `IL` type waits for the act timer to start counting up from zero, where it will then start. The `immediate` type will start the inputs immediately. The `fullgame` type waits for the game timer to resume from a paused state. Default is `IL`.
+
+The `length` key specifies the length of the TAS replay, in frames. There is no default; this key is required.
+
+The `fps` key specifies the in-game framerate that shall be used for the TAS. Defaults to `60`.
 
 Example header:
    
@@ -37,9 +43,10 @@ Example header:
 name: My cool TAS
 type: IL
 length: 240
+fps: 30
 ```
 
-The above would specify a replay with the name `My cool TAS`, an `IL` type, and a length of `240` frames.
+The above would specify a replay with the name `My cool TAS`, an `IL` type, and a length of `240` frames, running at `30` frames per second.
 
 ### Body
 The body consists of a list of frame numbers, each with a list of *input events*. The frame numbers work like the header keys above, in that they need to be immediately followed by a colon and space. You can specify input events after the colon and space. Frame numbers have, by convention, leading `0` padding, such that they are six characters long.

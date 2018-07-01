@@ -28,6 +28,7 @@ struct tas_metadata {
 	char* name = "Generic TAS";
 	tas_type type = INDIVIDUAL;
 	long length;
+	float fps = 60.f;
 	bool changes_speed = false;
 };
 

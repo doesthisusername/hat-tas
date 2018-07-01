@@ -22,8 +22,9 @@
 
 // it only wants to write on 4-byte aligned boundaries, so the first two bytes are filler, as the code we like isn't 4-byte aligned
 const BYTE nop_delta_buf[10] = { 0x79, 0x00, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
-const double desired_framerate = 1.0 / 60.0; // desired delta time
-float original_fps = 60.f;
+double desired_framerate = 1.0 / 60.0; // desired delta time
+float original_fps = 60.f; // fps setting before the TAS started
+double original_delta = 1.0 / 60.0; // for restoring framerate properly
 
 // breakpoint code
 const BYTE interrupt_op = 0xCC;
@@ -59,6 +60,7 @@ int main(int argc, char* argv[]) {
 	_tprintf(L"Parsing file...\n");
 	reports = parse_tas(argv[1], &meta);
 	_tprintf(L"Parsed file!\n");
+	desired_framerate = 1.f / meta.fps;
 
 	// find pid
 	HWND window = FindWindow(L"LaunchUnrealUWindowsClient", L"A Hat in Time (64-bit, Final Release Shipping PC, DX9)");
@@ -107,7 +109,6 @@ int main(int argc, char* argv[]) {
 	DebugActiveProcess(pid);
 	DebugSetProcessKillOnExit(FALSE); // we want it to keep running at end-of-TAS
 
-
 	// patch delta
 	WriteProcessMemory(process, base_address + PIB_GET_INTERFACE_OFFSET + DELTA_WRITE_CODE_OFFSET, nop_delta_buf, sizeof(nop_delta_buf), NULL); // code
 	WriteProcessMemory(process, base_address + PIB_GET_INTERFACE_OFFSET + DELTA_DATA_OFFSET, &desired_framerate, sizeof(desired_framerate), NULL); // data
@@ -116,8 +117,8 @@ int main(int argc, char* argv[]) {
 	// add software breakpoint
 	WriteProcessMemory(process, base_address + TICK_CODE_OFFSET, &interrupt_op, sizeof(interrupt_op), NULL);
 
-	Sleep(750); // give user time to give hat focus
-	printf(meta.type == IMMEDIATE ? "Playing %s!\n" : "Waiting to play %s!\n", meta.name);
+	printf(meta.type == IMMEDIATE ? "Playing %s in two seconds!\n" : "Waiting to play %s!\n", meta.name);
+	Sleep(2000); // give user time to give hat focus
 
 	bool started = false;
 	int i = 0;
@@ -172,7 +173,6 @@ int main(int argc, char* argv[]) {
 		old_act_time = act_time; // like in ASL
 		ReadProcessMemory(process, base_address + TIMER_OFFSET + (0x3C / 4), &act_time, sizeof(act_time), NULL); // read act time
 	
-		// TODO: implement fullgame type
 		// start if fullgame type, and game timer just started/game timer just resumed, OR start if IL type, and act timer just started from zero, OR start immediately if type is immediate
 		// !started in the beginning should make it not evaluate all the conditions once TAS has started
 		if(!started && (meta.type == FULLGAME && game_time > 0 && (old_game_time == 0 || (!timer_paused && old_timer_paused)) || (meta.type == INDIVIDUAL && act_time > 0 && old_act_time == 0) || (meta.type == IMMEDIATE))) {
@@ -191,6 +191,10 @@ int main(int argc, char* argv[]) {
 			// resolve and read current FPS value, so we can restore it at end-of-TAS
 			fps_address = resolve_ptr(base_address + FPS_PTR_OFFSET) + 0x710;
 			ReadProcessMemory(process, fps_address, &original_fps, sizeof(original_fps), NULL);
+			original_delta = 1.0 / original_fps;
+
+			// write the FPS value that'll be used for the TAS
+			WriteProcessMemory(process, fps_address, &meta.fps, sizeof(meta.fps), NULL);
 
 			// set start flag
 			started = true;
@@ -221,7 +225,7 @@ int main(int argc, char* argv[]) {
 
 		// write commands (just SPEED at the moment)
 		// only write if it ever changes, for performance - not sure if needed though
-		if(meta.changes_speed) WriteProcessMemory(process, fps_address, &reports[i].aux.speed, sizeof(float), NULL);
+		if(meta.changes_speed) WriteProcessMemory(process, fps_address, &reports[i].aux.speed, sizeof(reports[i].aux.speed), NULL);
 
 		WriteProcessMemory(process, base_address + TICK_CODE_OFFSET, &orig_tick, sizeof(orig_tick), NULL);
 		ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId, DBG_CONTINUE);
@@ -236,6 +240,7 @@ int main(int argc, char* argv[]) {
 	// cleanup
 	WriteProcessMemory(process, dinput_address + ANALOG_WRITE_CODE_OFFSET, orig_analog_buf, sizeof(orig_analog_buf), NULL); // put original back so dinput device analog sticks work again
 	WriteProcessMemory(process, dinput_address + GETDF_DI_JOYSTICK_OFFSET + BUTTON_WRITE_CODE_OFFSET, orig_button_buf, sizeof(orig_button_buf), NULL); // put original back so dinput device buttons work again
+	WriteProcessMemory(process, base_address + PIB_GET_INTERFACE_OFFSET + DELTA_DATA_OFFSET, &original_delta, sizeof(original_delta), NULL); // put back a fixed delta matching the original fps setting
 	WriteProcessMemory(process, fps_address, &original_fps, sizeof(original_fps), NULL); // write back original fps value
 
 	DebugActiveProcessStop(pid);
