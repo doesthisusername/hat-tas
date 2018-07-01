@@ -69,3 +69,8 @@ Example body:
 000070: SPEED:2      // set playback rate to 2x speed
 000100: DOWN ~SPEED  // blow a kiss, and go back to 1x speed
 ```
+
+### Resources
+.htas editor UI, made by wooferzfg - https://github.com/wooferzfg/hat-tas-ui
+
+The Boop Troop discord server - https://discordapp.com/invite/HJEgHBw
