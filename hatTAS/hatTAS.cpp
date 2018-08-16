@@ -19,6 +19,7 @@
 #define TOTAL_FRAMES_OFFSET (0x11802E0 / 4)
 #define TIMER_OFFSET (0x101B720 / 4)
 #define FPS_PTR_OFFSET (0x116D250 / 4)
+#define PLAYER_PTR_OFFSET (0x116F770 / 4)
 
 // it only wants to write on 4-byte aligned boundaries, so the first two bytes are filler, as the code we like isn't 4-byte aligned
 const BYTE nop_delta_buf[10] = { 0x79, 0x00, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
@@ -135,11 +136,11 @@ int main(int argc, char* argv[]) {
 	BYTE* analog_address = NULL;
 	BYTE* buttons_address = NULL;
 	BYTE* fps_address = NULL;
+	BYTE* player_address = NULL;
 
 	CONTEXT context;
 	DEBUG_EVENT debug_event;
 
-	// TODO: make the loop less intensive
 	// main loop
 	while(true) {
 		// allow ending the TAS prematurely (0x8000 means key down)
@@ -187,6 +188,16 @@ int main(int argc, char* argv[]) {
 			analog_address = resolve_ptr(analog_address + 0xA0);
 			analog_address = resolve_ptr(analog_address + 0x8); // analog_address now points to the right place
 			buttons_address = analog_address + 0xE4; // buttons
+
+			// write player position and rotation, if they are specified
+			if(meta.player_set) {
+				player_address = resolve_ptr(base_address + PLAYER_PTR_OFFSET);
+				player_address = resolve_ptr(player_address + 0x58);
+				player_address = resolve_ptr(player_address + 0x13C);
+				player_address = resolve_ptr(player_address + 0x6D0);
+				player_address = resolve_ptr(player_address + 0x134);
+				WriteProcessMemory(process, player_address + 0x80, &meta.player, sizeof(player_actor), NULL);
+			}
 
 			// resolve and read current FPS value, so we can restore it at end-of-TAS
 			fps_address = resolve_ptr(base_address + FPS_PTR_OFFSET) + 0x710;

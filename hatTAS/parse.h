@@ -24,12 +24,24 @@ enum tas_type {
 	IMMEDIATE
 };
 
+// only the pos and yaw is needed really
+struct player_actor {
+	float x_pos = 0.f;
+	float y_pos = 0.f;
+	float z_pos = 0.f;
+	int pitch = 0;
+	int yaw = 0;
+	int roll = 0;
+};
+
 struct tas_metadata {
 	char* name = "Generic TAS";
 	tas_type type = INDIVIDUAL;
 	long length;
 	float fps = 60.f;
 	bool changes_speed = false;
+	player_actor player;
+	bool player_set = false;
 };
 
 // mimicking how the game does it, so we can do fewer writes

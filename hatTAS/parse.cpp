@@ -62,6 +62,24 @@ input_report* parse_tas(const char* filename, tas_metadata* meta_out) {
 		else if(starts_with(file_data[cur_line], "type: ")) meta_out->type = (starts_with(file_data[cur_line] + 6, "fullgame") ? FULLGAME : starts_with(file_data[cur_line] + 6, "IL") ? INDIVIDUAL : IMMEDIATE); // "type: " is 6
 		else if(starts_with(file_data[cur_line], "length: ")) meta_out->length = strtol(file_data[cur_line] + 8, NULL, 10); // "length: " is 8
 		else if(starts_with(file_data[cur_line], "fps: ")) meta_out->fps = strtof(file_data[cur_line] + 5, NULL); // "fps: " is 5
+		else if(starts_with(file_data[cur_line], "start: ")) {
+			char* next_token;
+			char* args = file_data[cur_line] + 7; // "start: " is 7
+			char* token = strtok_s(args, " ", &next_token);
+			if(token == NULL) {
+				cur_line++;
+				continue;
+			}
+
+			meta_out->player_set = true;
+			meta_out->player.x_pos = strtof(token, NULL);
+			token = strtok_s(NULL, " ", &next_token);
+			meta_out->player.y_pos = strtof(token, NULL);
+			token = strtok_s(NULL, " ", &next_token);
+			meta_out->player.z_pos = strtof(token, NULL);
+			token = strtok_s(NULL, " ", &next_token);
+			meta_out->player.yaw = atoi(token);
+		}
 		cur_line++;
 	}
 
