@@ -14,7 +14,7 @@ This program is very early in development, and thus is not ready for general usa
 
 **Note**: this program only works if you have a (possibly virtual) XInput (Xbox 360, for example) controller connected to the game, currently.
 
-**Note**: this program only supports a single version of the game, due to pointers in the executable likely changing. It's the "DLC1.5" patch (`	8061143192026666389`). Please visit the Boop Troop (AHiT speedrunning) discord server for more information.
+**Note**: this program only supports a single version of the game, due to pointers in the executable likely changing. It's the "DLC1.5" patch (`8061143192026666389`). Please visit the Boop Troop (AHiT speedrunning) discord server for more information.
 
 ## Usage
 To use this program, open the command line in the current directory, and run `hatTAS.exe <movie.htas>`. For example, `hatTAS.exe sample.htas`. If using an immediate type TAS, remember to give the game focus quickly, or the inputs won't go through.
