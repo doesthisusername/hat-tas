@@ -60,31 +60,17 @@ input_report* parse_tas(const char* filename, tas_metadata* meta_out) {
 	while(file_data[cur_line][0] < 0x30 || file_data[cur_line][0] > 0x39) { // 0x30 -> 0, 0x39 -> 9
 		if(starts_with(file_data[cur_line], "name: ")) meta_out->name = file_data[cur_line] + 6; // "name: " is 6 
 		else if(starts_with(file_data[cur_line], "type: ")) meta_out->type = (starts_with(file_data[cur_line] + 6, "fullgame") ? FULLGAME : starts_with(file_data[cur_line] + 6, "IL") ? INDIVIDUAL : IMMEDIATE); // "type: " is 6
+		else if(starts_with(file_data[cur_line], "players: ")) meta_out->player_count = strtol(file_data[cur_line] + 9, NULL, 10); // "players: " is 9
 		else if(starts_with(file_data[cur_line], "length: ")) meta_out->length = strtol(file_data[cur_line] + 8, NULL, 10); // "length: " is 8
 		else if(starts_with(file_data[cur_line], "fps: ")) meta_out->fps = strtof(file_data[cur_line] + 5, NULL); // "fps: " is 5
-		else if(starts_with(file_data[cur_line], "start: ")) {
-			char* next_token;
-			char* args = file_data[cur_line] + 7; // "start: " is 7
-			char* token = strtok_s(args, " ", &next_token);
-			if(token == NULL) {
-				cur_line++;
-				continue;
-			}
 
-			meta_out->player_set = true;
-			meta_out->player.x_pos = strtof(token, NULL);
-			token = strtok_s(NULL, " ", &next_token);
-			meta_out->player.y_pos = strtof(token, NULL);
-			token = strtok_s(NULL, " ", &next_token);
-			meta_out->player.z_pos = strtof(token, NULL);
-			token = strtok_s(NULL, " ", &next_token);
-			meta_out->player.yaw = atoi(token);
-		}
 		cur_line++;
 	}
 
 	// no length set in file
 	if(meta_out->length == NULL) throw NO_LEN_SPECIFIED_ERROR;
+	// too many players specified
+	if(meta_out->player_count > ALLOWED_PLAYERS) throw TOO_MANY_PLAYERS_ERROR;
 
 	input_report* reports;
 	input_report tmp_report;
@@ -116,6 +102,8 @@ input_report* parse_tas(const char* filename, tas_metadata* meta_out) {
 			reports[i - 1] = tmp_report;
 		}
 
+		long player_id = 0;
+
 		// parse position data
 		while(token != NULL) {
 			// get new token (input)
@@ -130,58 +118,66 @@ input_report* parse_tas(const char* filename, tas_metadata* meta_out) {
 				token++; // ignore the tilde
 				negated = true;
 			}
-			// it's being dumb, only starts_with() works...
+			// it's being dumb, only starts_with() works... also sorry for the mess
+			// | means go to next player (cycles back automatically)
+			if(starts_with(token, "|")) player_id = player_id == meta_out->player_count - 1 ? 0 : player_id + 1;
+
 			// buttons 
-			if(starts_with(token, "A")) tmp_report.buttons.a = !negated ? 0x80 : 0;
-			else if(starts_with(token, "B")) tmp_report.buttons.b = !negated ? 0x80 : 0;
-			else if(starts_with(token, "X")) tmp_report.buttons.x = !negated ? 0x80 : 0;
-			else if(starts_with(token, "Y")) tmp_report.buttons.y = !negated ? 0x80 : 0;
-			else if(starts_with(token, "LB")) tmp_report.buttons.lb = !negated ? 0x80 : 0;
-			else if(starts_with(token, "RB")) tmp_report.buttons.rb = !negated ? 0x80 : 0;
-			else if(starts_with(token, "LT")) tmp_report.buttons.lt = !negated ? 0x80 : 0;
-			else if(starts_with(token, "RT")) tmp_report.buttons.rt = !negated ? 0x80 : 0;
-			else if(starts_with(token, "START")) tmp_report.buttons.start = !negated ? 0x80 : 0;
-			else if(starts_with(token, "SELECT")) tmp_report.buttons.select = !negated ? 0x80 : 0;
+			else if(starts_with(token, "A")) tmp_report.gamepads[player_id].button_state ^= (-!negated ^ tmp_report.gamepads[player_id].button_state) & BTN_A;
+			else if(starts_with(token, "B")) tmp_report.gamepads[player_id].button_state ^= (-!negated ^ tmp_report.gamepads[player_id].button_state) & BTN_B;
+			else if(starts_with(token, "X")) tmp_report.gamepads[player_id].button_state ^= (-!negated ^ tmp_report.gamepads[player_id].button_state) & BTN_X;
+			else if(starts_with(token, "Y")) tmp_report.gamepads[player_id].button_state ^= (-!negated ^ tmp_report.gamepads[player_id].button_state) & BTN_Y;
+			else if(starts_with(token, "LB")) tmp_report.gamepads[player_id].button_state ^= (-!negated ^ tmp_report.gamepads[player_id].button_state) & BTN_LB;
+			else if(starts_with(token, "RB")) tmp_report.gamepads[player_id].button_state ^= (-!negated ^ tmp_report.gamepads[player_id].button_state) & BTN_RB;
+			else if(starts_with(token, "LT")) tmp_report.gamepads[player_id].left_trigger = !negated ? 0xFF : 0;
+			else if(starts_with(token, "RT")) tmp_report.gamepads[player_id].right_trigger = !negated ? 0xFF : 0;
+			else if(starts_with(token, "START")) tmp_report.gamepads[player_id].button_state ^= (-!negated ^ tmp_report.gamepads[player_id].button_state) & BTN_START;
+			else if(starts_with(token, "BACK")) tmp_report.gamepads[player_id].button_state ^= (-!negated ^ tmp_report.gamepads[player_id].button_state) & BTN_BACK;
 
 			// dpad
-			else if(starts_with(token, "UP")) tmp_report.pov.up = !negated;
-			else if(starts_with(token, "RIGHT")) tmp_report.pov.right = !negated;
-			else if(starts_with(token, "DOWN")) tmp_report.pov.down = !negated;
-			else if(starts_with(token, "LEFT")) tmp_report.pov.left = !negated;
+			else if(starts_with(token, "UP")) tmp_report.gamepads[player_id].button_state ^= (-!negated ^ tmp_report.gamepads[player_id].button_state) & BTN_DPAD_UP;
+			else if(starts_with(token, "RIGHT")) tmp_report.gamepads[player_id].button_state ^= (-!negated ^ tmp_report.gamepads[player_id].button_state) & BTN_DPAD_RIGHT;
+			else if(starts_with(token, "DOWN")) tmp_report.gamepads[player_id].button_state ^= (-!negated ^ tmp_report.gamepads[player_id].button_state) & BTN_DPAD_DOWN;
+			else if(starts_with(token, "LEFT")) tmp_report.gamepads[player_id].button_state ^= (-!negated ^ tmp_report.gamepads[player_id].button_state) & BTN_DPAD_LEFT;
 
 			// analog -- auto-detects number base (or at least it should)
-			else if(starts_with(token, "LX")) tmp_report.analog.lx = !negated ? strtol(token + 3, NULL, NULL) : AXIS_MAX / 2;
-			else if(starts_with(token, "LY")) tmp_report.analog.ly = !negated ? strtol(token + 3, NULL, NULL) : AXIS_MAX / 2;
-			else if(starts_with(token, "RX")) tmp_report.analog.rx = !negated ? strtol(token + 3, NULL, NULL) : AXIS_MAX / 2;
-			else if(starts_with(token, "RY")) tmp_report.analog.ry = !negated ? strtol(token + 3, NULL, NULL) : AXIS_MAX / 2;
+			else if(starts_with(token, "LX")) tmp_report.gamepads[player_id].lx = !negated ? strtol(token + 3, NULL, NULL) : 0;
+			else if(starts_with(token, "LY")) tmp_report.gamepads[player_id].ly = !negated ? strtol(token + 3, NULL, NULL) : 0;
+			else if(starts_with(token, "RX")) tmp_report.gamepads[player_id].rx = !negated ? strtol(token + 3, NULL, NULL) : 0;
+			else if(starts_with(token, "RY")) tmp_report.gamepads[player_id].ry = !negated ? strtol(token + 3, NULL, NULL) : 0;
 
 			// commands
 			else if(starts_with(token, "SPEED")) {
 				tmp_report.aux.speed = !negated ? strtof(token + 6, NULL) * meta_out->fps : meta_out->fps;
 				meta_out->changes_speed = true; // try to optimize the WriteProcessMemory() calls a little
 			}
+			// comma-separated list of rand values to cyclically return
+			else if(starts_with(token, "RNG")) {
+				if(!negated) {
+					int n = 0;
 
-			// probably really inefficient, doesn't matter too much, as we're not playing while parsing
-			long hat;
-			if(tmp_report.pov.up) {
-				if(tmp_report.pov.right) hat = 4500;
-				else if(tmp_report.pov.left) hat = 31500;
-				else hat = 0;
-			}
-			else if(tmp_report.pov.right) {
-				if(tmp_report.pov.down) hat = 13500;
-				else hat = 9000;
-			}
-			else if(tmp_report.pov.down) {
-				if(tmp_report.pov.left) hat = 22500;
-				else hat = 18000;
-			}
-			else if(tmp_report.pov.left) {
-				hat = 27000;
-			}
-			else hat = -1; // neutral
+					char* sub_char = token + 4; // "RNG:" is 4 characters
+					char* sub_token = sub_char;
 
-			tmp_report.analog.hat = hat;
+					// comma-separate
+					while(*sub_char != '\0') {
+						if(*sub_char == ',' || *(sub_char + 1) == '\0') {
+							if(*sub_char == ',') *sub_char = '\0';
+
+							tmp_report.aux.rand_seq[n++] = atoi(sub_token) << 0x10;
+							sub_token = sub_char + 1;
+						}
+
+						sub_char++;
+					}
+
+					tmp_report.aux.rand_seq_max = n - 1;
+				}
+				else {
+					tmp_report.aux.rand_seq_max = 0;
+					tmp_report.aux.rand_seq[0] = 0;
+				}
+			}
 		}
 		
 		// finish up the frame line

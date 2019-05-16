@@ -4,18 +4,32 @@
 #include <stdio.h>
 #include <string>
 
-#define AXIS_MIN 0
-#define AXIS_MAX 65535
+#define AXIS_MIN -32768
+#define AXIS_MAX 32767
 
-#define BTN_UP 0
-#define BTN_DOWN 1
+#define BTN_DPAD_UP 0x0001
+#define BTN_DPAD_DOWN 0x0002
+#define BTN_DPAD_LEFT 0x0004
+#define BTN_DPAD_RIGHT 0x0008
+#define BTN_START 0x0010
+#define BTN_BACK 0x0020
+#define BTN_LEFT_THUMB 0x0040
+#define BTN_RIGHT_THUMB 0x0080
+#define BTN_LB 0x0100
+#define BTN_RB 0x0200
+#define BTN_A 0x1000
+#define BTN_B 0x2000
+#define BTN_X 0x4000
+#define BTN_Y 0x8000
 
+#define ALLOWED_PLAYERS 2
 #define ASSUMED_LINE_COUNT 0x1000
 #define ASSUMED_COLUMN_COUNT 0x80
 
 enum parse_error {
 	FILE_NOT_FOUND_ERROR = -1,
-	NO_LEN_SPECIFIED_ERROR = -2
+	NO_LEN_SPECIFIED_ERROR = -2,
+	TOO_MANY_PLAYERS_ERROR = -3
 };
 
 enum tas_type {
@@ -24,67 +38,35 @@ enum tas_type {
 	IMMEDIATE
 };
 
-// only the pos and yaw is needed really
-struct player_actor {
-	float x_pos = 0.f;
-	float y_pos = 0.f;
-	float z_pos = 0.f;
-	int pitch = 0;
-	int yaw = 0;
-	int roll = 0;
-};
-
 struct tas_metadata {
 	char* name = "Generic TAS";
 	tas_type type = INDIVIDUAL;
 	long length;
+	long player_count = 1;
 	float fps = 60.f;
 	bool changes_speed = false;
-	player_actor player;
-	bool player_set = false;
 };
 
 // mimicking how the game does it, so we can do fewer writes
-// binary inputs
-struct buttons_report {
-	BYTE x = 0;
-	BYTE a = 0;
-	BYTE b = 0;
-	BYTE y = 0;
-	BYTE lb = 0;
-	BYTE rb = 0;
-	BYTE lt = 0;
-	BYTE rt = 0;
-	BYTE select = 0;
-	BYTE start = 0;
-};
-
-// analog inputs (analog sticks as well as dpad)
-struct analog_report {
-	long ry = AXIS_MAX / 2;
-	long rx = AXIS_MAX / 2;
-	long ly = AXIS_MAX / 2;
-	long lx = AXIS_MAX / 2;
-	long hat = -1;
-};
-
-// game doesn't do this, I just do it because I can't figure out how to calculate correct pov value otherwise
-struct pov_help {
-	bool up = false;
-	bool right = false;
-	bool down = false;
-	bool left = false;
+struct state_report {
+	WORD button_state = 0; // bitmask of buttons
+	BYTE left_trigger = 0;
+	BYTE right_trigger = 0;
+	SHORT lx = 0;
+	SHORT ly = 0;
+	SHORT rx = 0;
+	SHORT ry = 0;
 };
 
 // extra data not related to inputs
 struct aux_data {
 	float speed = 60.f;
+	int rand_seq_max = 0;
+	unsigned int rand_seq[0x10] = { 0 };
 };
 
 struct input_report {
-	buttons_report buttons;
-	analog_report analog;
-	pov_help pov;
+	state_report gamepads[ALLOWED_PLAYERS];
 	aux_data aux;
 };
 
