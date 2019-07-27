@@ -3,9 +3,9 @@ type: immediate
 length: 100
 
 // supports comments here
-000001: LT LY:0         // sprint forward
+000001: LT LY:32767     // sprint forward
 000031: ~LT A           // SDJ
 000061: ~A              // let go of A
 000062: A               // jump again
 
-// TAS playback will keep holding A and having LY at 0 until frame 100 has played
+// TAS playback will keep holding A and having LY at 32767 until frame 100 has played
