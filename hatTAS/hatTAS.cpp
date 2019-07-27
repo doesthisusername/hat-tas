@@ -21,7 +21,6 @@
 // msvcr offsets
 #define RAND_CODE_OFFSET (0x7947D)
 
-// it only wants to write on 4-byte aligned boundaries, so the first two bytes are filler, as our target code isn't 4-byte aligned
 const BYTE nop_delta_buf[8] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
 double desired_framerate = 1.0 / 60.0; // desired delta time
 float original_fps = 60.f; // fps setting before the TAS started
@@ -43,6 +42,10 @@ const int zero = 0;
 tas_metadata meta;
 input_report* reports;
 char* movie_filename = NULL;
+
+// layout
+layout_def* layout = NULL;
+char* layout_filename = NULL;
 
 BYTE* base_address = NULL;
 BYTE* xinput_address = NULL;
@@ -127,6 +130,31 @@ int init() {
 	return 1;
 }
 
+// google
+void ClearScreen() {
+	HANDLE                     hStdOut;
+	CONSOLE_SCREEN_BUFFER_INFO csbi;
+	DWORD                      count;
+	DWORD                      cellCount;
+	COORD                      homeCoords = { 0, 0 };
+
+	hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+	if(hStdOut == INVALID_HANDLE_VALUE) return;
+
+	/* Get the number of cells in the current buffer */
+	if(!GetConsoleScreenBufferInfo(hStdOut, &csbi)) return;
+	cellCount = csbi.dwSize.X *csbi.dwSize.Y;
+
+	/* Fill the entire buffer with spaces */
+	if(!FillConsoleOutputCharacter(hStdOut, (TCHAR) ' ', cellCount, homeCoords, &count)) return;
+
+	/* Fill the entire buffer with the current colors and attributes */
+	if(!FillConsoleOutputAttribute(hStdOut, csbi.wAttributes, cellCount, homeCoords, &count)) return;
+
+	/* Move the cursor home */
+	SetConsoleCursorPosition(hStdOut, homeCoords);
+}
+
 BOOL WINAPI cleanup_handler(DWORD signal) {
 	if(signal == CTRL_C_EVENT) {
 		// game memory
@@ -166,6 +194,12 @@ void play_movie() {
 
 	bool timer_paused = false;
 	bool old_timer_paused = false;
+
+	bool rshift_down = false;
+	bool old_rshift_down = false;
+	bool lctrl_down = false;
+	bool old_lctrl_down = false;
+	bool framestepping = false;
 
 	BYTE* xinput_state_address = NULL;
 
@@ -233,6 +267,10 @@ void play_movie() {
 		ReadProcessMemory(process, base_address + TIMER_OFFSET + 0x34, &game_time, sizeof(game_time), NULL); // read game time
 		old_act_time = act_time; // like in ASL
 		ReadProcessMemory(process, base_address + TIMER_OFFSET + 0x3C, &act_time, sizeof(act_time), NULL); // read act time
+		old_rshift_down = rshift_down; // like in ASL
+		rshift_down = (GetAsyncKeyState(VK_RSHIFT) & 0x8000) == 0x8000; // framestep
+		old_lctrl_down = lctrl_down; // like in ASL
+		lctrl_down = (GetAsyncKeyState(VK_LCONTROL) & 0x8000) == 0x8000; // exit framestep
 
 		// start if fullgame type, and game timer just started/game timer just resumed, OR start if IL type, and act timer just started from zero, OR start immediately if type is immediate
 		// !started in the beginning should make it not evaluate all the conditions once TAS has started
@@ -299,6 +337,90 @@ void play_movie() {
 			continue;
 		}
 
+		// framestep logic
+		if(framestepping || rshift_down) {
+			printf("Stepping at frame %d\n", i);
+			do {
+				Sleep(5);
+
+				old_rshift_down = rshift_down;
+				rshift_down = (GetAsyncKeyState(VK_RSHIFT) & 0x8000) == 0x8000; // framestep
+				old_lctrl_down = lctrl_down;
+				lctrl_down = (GetAsyncKeyState(VK_LCONTROL) & 0x8000) == 0x8000; // exit framestep
+
+				if(rshift_down) framestepping = true;
+				if(lctrl_down) framestepping = false;
+			}
+			while((!rshift_down || old_rshift_down) && !lctrl_down);
+		}
+
+		// draw layout
+		if(layout != NULL) {
+			ClearScreen();
+
+			// iterate items
+			for(int ii = 0; ii < layout->item_n; ii++) {
+				const layout_itm* item = layout->items[ii];
+				const layout_type type = item->type;
+				const layout_op op = item->op;
+				
+				// likely not actually a u64; gets cast later
+				// also intermediate storage during resolving
+				unsigned long long* resolved = (unsigned long long*)calloc(item->ppath_n, sizeof(unsigned long long));
+				unsigned long long final_value_fixed = 0;
+				double final_value_float = 0;
+
+				// iterate ppaths
+				for(int iii = 0; iii < item->ppath_n; iii++) {
+					// iterate offsets
+					for(int iiii = 0; iiii < item->ppaths[iii].offset_n; iiii++) {
+						// resolve
+						if(iiii < item->ppaths[iii].offset_n - 1) {
+							resolved[iii] = (unsigned long long)resolve_ptr((void*)(resolved[iii] + item->ppaths[iii].offsets[iiii]));
+						}
+						// last iter
+						else {
+							resolved[iii] += item->ppaths[iii].offsets[iiii];
+							ReadProcessMemory(process, base_address + resolved[iii], &resolved[iii], sizeof(resolved[iii]), NULL);
+						}
+					}
+
+					// perform basic ops (this is awful)
+					switch(op) {
+						case OP_ADD: {
+							switch(type) {
+								case ITM_U32: final_value_fixed += (unsigned long long)*(unsigned int*)&resolved[iii]; break;
+								case ITM_S32: final_value_fixed += (unsigned long long)*(int*)&resolved[iii]; break;
+								case ITM_F32: final_value_float += (double)*(float*)&resolved[iii]; break;
+								case ITM_F64: final_value_float += *(double*)&resolved[iii]; break;
+							}
+							break;
+						}
+						case OP_MAG: {
+							switch(type) {
+								case ITM_F32: final_value_float += pow((double)*(float*)&resolved[iii], 2); break;
+								case ITM_F64: final_value_float += pow(*(double*)&resolved[iii], 2); break;
+							}
+							break;
+						}
+					}
+				}
+
+				if(op == OP_MAG) {
+					final_value_float = sqrt(final_value_float);
+				}
+
+				if(type == ITM_F32 || type == ITM_F64) {
+					printf(layout->formats[ii], final_value_float);
+				}
+				else {
+					printf(layout->formats[ii], final_value_fixed);
+				}
+
+				free(resolved);
+			}
+		}
+
 		// write commands
 		// only write if it ever changes, for performance - not sure if needed though
 		if(meta.changes_speed) WriteProcessMemory(process, fps_address, &reports[i].aux.speed, sizeof(reports[i].aux.speed), NULL);
@@ -328,6 +450,7 @@ void play_movie() {
 	// cleanup
 	WriteProcessMemory(process, msvcr_address + RAND_CODE_OFFSET, orig_rand, sizeof(orig_rand), NULL);
 	WriteProcessMemory(process, base_address + GET_STATE_CODE_OFFSET, &orig_xinput, sizeof(orig_xinput), NULL);
+	WriteProcessMemory(process, base_address + POST_GET_STATE_CODE_OFFSET, &orig_post_xinput, sizeof(orig_post_xinput), NULL);
 	WriteProcessMemory(process, fps_address, &original_fps, sizeof(original_fps), NULL);
 
 	_tprintf(L"Done in %f!\n\n", meta.type == INDIVIDUAL ? act_time : game_time - started_time);
@@ -339,14 +462,15 @@ int main(int argc, char* argv[]) {
 	for(int i = 1; i < argc; i++) {
 		if(argv[i][0] == '-') {
 			switch(argv[i][1]) {
-				case 'r': repeat = true;
+				case 'r': repeat = true; break;
+				case 'l': layout_filename = argv[i] + 2; break;
 			}
 		}
 		else movie_filename = argv[i];
 	}
 
 	if(movie_filename == NULL) {
-		_tprintf(L"A TAS movie filename wasn't specified!\nUsage: hatTAS.exe [-r] <movie.htas>\n\nExiting...\n");
+		_tprintf(L"A TAS movie filename wasn't specified!\nUsage: hatTAS.exe [-r] [-l<layout.hlay>] <movie.htas>\n\nExiting...\n");
 		return 0;
 	}
 
@@ -358,8 +482,17 @@ int main(int argc, char* argv[]) {
 	// catch ctrl+c for cleanup reasons
 	SetConsoleCtrlHandler(cleanup_handler, TRUE);
 
+	// parse once, for example to get correct starting condition
+	reports = parse_tas(movie_filename, &meta);
+
+	// parse layout just once
+	if(layout_filename != NULL) {
+		layout = parse_lay(layout_filename);
+	}
+
 	_tprintf(L"Done initializing, ready!\n\n");
 
+	// main main loop
 	do {
 		play_movie();
 	}

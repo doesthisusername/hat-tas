@@ -2,9 +2,10 @@
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+    <LocalDebuggerCommandArguments>"-lD:\VS Projects\Hat_TAS\x64\Release\generic15.hlay" "D:\VS Projects\Hat_TAS\x64\Release\any_spaceship.htas"</LocalDebuggerCommandArguments>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <LocalDebuggerCommandArguments>"D:\VS Projects\Hat_TAS\x64\Release\x_dwtm_entry_2244.htas"</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>"-lD:\VS Projects\Hat_TAS\x64\Release\generic15.hlay" "D:\VS Projects\Hat_TAS\x64\Release\any_spaceship.htas"</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
 </Project>

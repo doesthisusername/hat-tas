@@ -13,11 +13,11 @@ bool starts_with(const char* input, const char* search) {
 	return true;
 }
 
-// parses a tas input file for a hat in time
-input_report* parse_tas(const char* filename, tas_metadata* meta_out) {
+// remember to free!
+char** read_lines(const char* filename, int* out_lines) {
 	FILE* input;
 	fopen_s(&input, filename, "r");
-	
+
 	// file not found
 	if(input == NULL) throw FILE_NOT_FOUND_ERROR;
 
@@ -55,14 +55,24 @@ input_report* parse_tas(const char* filename, tas_metadata* meta_out) {
 		file_data[line_num][column_num] = (char)character;
 	}
 
+	*out_lines = line_num;
+	fclose(input);
+	return file_data;
+}
+
+// parses a tas input file for a hat in time
+input_report* parse_tas(const char* filename, tas_metadata* meta_out) {
+	int line_num;
+	char** lines = read_lines(filename, &line_num);
+
 	int cur_line = 0;
 	// loop until the first "frame" line is reached, filling out metadata
-	while(file_data[cur_line][0] < 0x30 || file_data[cur_line][0] > 0x39) { // 0x30 -> 0, 0x39 -> 9
-		if(starts_with(file_data[cur_line], "name: ")) meta_out->name = file_data[cur_line] + 6; // "name: " is 6 
-		else if(starts_with(file_data[cur_line], "type: ")) meta_out->type = (starts_with(file_data[cur_line] + 6, "fullgame") ? FULLGAME : starts_with(file_data[cur_line] + 6, "IL") ? INDIVIDUAL : IMMEDIATE); // "type: " is 6
-		else if(starts_with(file_data[cur_line], "players: ")) meta_out->player_count = strtol(file_data[cur_line] + 9, NULL, 10); // "players: " is 9
-		else if(starts_with(file_data[cur_line], "length: ")) meta_out->length = strtol(file_data[cur_line] + 8, NULL, 10); // "length: " is 8
-		else if(starts_with(file_data[cur_line], "fps: ")) meta_out->fps = strtof(file_data[cur_line] + 5, NULL); // "fps: " is 5
+	while(lines[cur_line][0] < 0x30 || lines[cur_line][0] > 0x39) { // 0x30 -> 0, 0x39 -> 9
+		if(starts_with(lines[cur_line], "name: ")) meta_out->name = lines[cur_line] + 6; // "name: " is 6 
+		else if(starts_with(lines[cur_line], "type: ")) meta_out->type = (starts_with(lines[cur_line] + 6, "fullgame") ? FULLGAME : starts_with(lines[cur_line] + 6, "IL") ? INDIVIDUAL : IMMEDIATE); // "type: " is 6
+		else if(starts_with(lines[cur_line], "players: ")) meta_out->player_count = strtol(lines[cur_line] + 9, NULL, 10); // "players: " is 9
+		else if(starts_with(lines[cur_line], "length: ")) meta_out->length = strtol(lines[cur_line] + 8, NULL, 10); // "length: " is 8
+		else if(starts_with(lines[cur_line], "fps: ")) meta_out->fps = strtof(lines[cur_line] + 5, NULL); // "fps: " is 5
 
 		cur_line++;
 	}
@@ -91,9 +101,9 @@ input_report* parse_tas(const char* filename, tas_metadata* meta_out) {
 		cur_line++;
 
 		// if it's a comment
-		if(starts_with(file_data[cur_line], "//")) continue; // notice we're not incrementing frame_line, as it's not a frame
+		if(starts_with(lines[cur_line], "//")) continue; // notice we're not incrementing frame_line, as it's not a frame
 		// not a comment, let's find the frame number
-		char* token = strtok_s(file_data[cur_line], ":", &next_token);
+		char* token = strtok_s(lines[cur_line], ":", &next_token);
 		if(token == NULL) continue; // line doesn't start with a number, could be blank
 		cur_frame = strtol(token, NULL, 10); // convert frame count string to an integer
 
@@ -191,9 +201,48 @@ input_report* parse_tas(const char* filename, tas_metadata* meta_out) {
 		reports[i - 1] = tmp_report;
 	}
 
-	// so i don't forget
-	fclose(input);
-	free(file_data);
+	free(lines);
 
 	return reports;
+}
+
+// NOTE: if we ever get multiple layouts/layout hotswap, we'll need to free a bunch of stuff allocated here
+layout_def* parse_lay(const char* filename) {
+	int line_num;
+	char** lines = read_lines(filename, &line_num);
+
+	layout_def* layout = (layout_def*)malloc(sizeof(layout_def));
+	layout->item_n = atoi(lines[0]);
+
+	layout->items = (layout_itm**)malloc(layout->item_n * sizeof(layout_itm*));
+	layout->formats = (char**)malloc(layout->item_n * sizeof(char*));
+
+	for(int i = 0; i < layout->item_n; i++) {
+		layout_itm* item = (layout_itm*)malloc(sizeof(layout_itm));
+		item->type = (layout_type)lines[i + 1][0];
+		item->op = (layout_op)lines[i + 1][1];
+		item->ppath_n = 0;
+		item->ppaths[0].offset_n = 0;
+
+		layout->items[i] = item; // this still gets filled in the loop below
+		layout->formats[i] = lines[i + layout->item_n + 1];
+
+		const char* ppath_lit = lines[i + 1] + 2; // skips type and op
+		for(int ii = 0; ppath_lit[ii] != 0x00; ii++) {
+			if(ppath_lit[ii] == ',') {
+				item->ppath_n++;
+				item->ppaths[item->ppath_n].offset_n = 0;
+			}
+			else {
+				item->ppaths[item->ppath_n].offsets[item->ppaths[item->ppath_n].offset_n++] = strtoull(ppath_lit + ii, NULL, 16);
+				do {
+					ii++;
+				}
+				while(ppath_lit[ii] != '+' && ppath_lit[ii] != 0x00);
+			}
+		}
+	}
+
+	free(lines);
+	return layout;
 }

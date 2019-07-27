@@ -40,7 +40,7 @@ enum tas_type {
 
 struct tas_metadata {
 	char* name = "Generic TAS";
-	tas_type type = INDIVIDUAL;
+	tas_type type = FULLGAME;
 	long length;
 	long player_count = 1;
 	float fps = 60.f;
@@ -70,5 +70,38 @@ struct input_report {
 	aux_data aux;
 };
 
+// layout stuff
+enum layout_op : char {
+	OP_ADD = '+',
+	OP_MAG = 'm'
+};
+
+enum layout_type : char {
+	ITM_U32 = 'i',
+	ITM_S32 = 'I',
+	ITM_F32 = 'f',
+	ITM_F64 = 'd'
+};
+
+struct ppath {
+	int offset_n;
+	unsigned long long offsets[0x10]; // bad
+};
+
+struct layout_itm {
+	int ppath_n;
+	layout_op op; // op is applied to all of the ppaths
+	layout_type type;
+	ppath ppaths[8]; // bad
+};
+
+struct layout_def {
+	int item_n;
+	layout_itm** items;
+	char** formats;
+};
+
 bool starts_with(const char* input, const char* search);
+char** read_lines(const char* filename, int* out_lines);
 input_report* parse_tas(const char* filename, tas_metadata* meta_out);
+layout_def* parse_lay(const char* filename);
