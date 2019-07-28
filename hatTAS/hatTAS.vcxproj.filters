@@ -24,6 +24,9 @@
     <ClInclude Include="parse.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="inih\INIReader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
@@ -35,5 +38,15 @@
     <ClCompile Include="parse.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\versions.ini">
+      <Filter>Resource Files</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="inih\LICENSE.txt">
+      <Filter>Resource Files</Filter>
+    </Text>
   </ItemGroup>
 </Project>

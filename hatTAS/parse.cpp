@@ -175,6 +175,10 @@ input_report* parse_tas(const char* filename, tas_metadata* meta_out) {
 							if(*sub_char == ',') *sub_char = '\0';
 
 							tmp_report.aux.rand_seq[n++] = atoi(sub_token) << 0x10;
+							if(atoi(sub_token) > 32767) {
+								printf("Warning: random value of %s is too high (over 32767); this will result in behaviour not normally in the game\n", sub_token);
+							}
+
 							sub_token = sub_char + 1;
 						}
 

@@ -2,6 +2,11 @@
 #include <Windows.h>
 #include <stdio.h>
 #include <tlhelp32.h>
+
+#pragma warning(disable:4996) // _CRT_SECURE_NO_WARNINGS substitute
+#include "inih/INIReader.h"
+#pragma warning(default:4996)
+
 #include "parse.h"
 
 #define HAT_WINDOW L"LaunchUnrealUWindowsClient"
@@ -9,17 +14,22 @@
 #define HAT_EXE_NAME L"HatinTimeGame.exe"
 #define XINPUT_DLL_NAME L"XINPUT1_3.dll"
 #define MSVCR_DLL_NAME L"MSVCR100.dll"
+#define RAND_CODE_OFFSET (0x7947D) // this is from msvcr
+#define PE_SECTION_PTR (0x3C)
+#define PE_TS_OFFSET (0x08)
 
-#define GET_STATE_CODE_OFFSET (0x9AC3EA)
-#define POST_GET_STATE_CODE_OFFSET (0x9AC3EF)
-#define TICK_CODE_OFFSET (0x3D7A70)
-#define DELTA_WRITE_CODE_OFFSET (0x9D7F86)
-#define DELTA_DATA_OFFSET (0x104D6E8)
-#define TOTAL_FRAMES_OFFSET (0x11D07A0)
-#define TIMER_OFFSET (0x10719D0)
-#define FPS_PTR_OFFSET (0x11C27E0)
-// msvcr offsets
-#define RAND_CODE_OFFSET (0x7947D)
+// game pointers/addresses from config
+unsigned int game_timestamp;
+char timestamp_str[0x10];
+INIReader* ini;
+long delta_codes;
+void* xinput_get_state;
+void* xinput_get_state_post;
+void* tick_code;
+void* delta_update[2];
+void* delta_data;
+void* speedrun_timer;
+void* fps_ptr;
 
 const BYTE nop_delta_buf[8] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
 double desired_framerate = 1.0 / 60.0; // desired delta time
@@ -68,6 +78,25 @@ BYTE* resolve_ptr(void* address) {
 	return resolved;
 }
 
+void* resolve_ptr_path(const char* path) {
+	char* next;
+	unsigned long long offset;
+
+	if(!process || !base_address) {
+		return NULL;
+	}
+
+	unsigned long long resolved = (unsigned long long)base_address + strtoull(path, &next, 0);
+
+	while(path + strlen(path) > next) {
+		offset = strtoull(next + 1, &next, 0);
+		ReadProcessMemory(process, (void*)resolved, &resolved, 8, NULL);
+		resolved += offset;
+	}
+
+	return (void*)resolved;
+}
+
 int init() {
 	// find pid
 	window = FindWindow(HAT_WINDOW, HAT_TITLE);
@@ -76,7 +105,7 @@ int init() {
 	// get process handle passing in the pid
 	process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
 	if(process == NULL) {
-		_tprintf(L"Failed to open the HatinTimeGame process!\n");
+		_tprintf(L"Failed to open the " HAT_EXE_NAME " process!\n");
 		return 0;
 	}
 	// get thread handle passing in the tid
@@ -113,13 +142,49 @@ int init() {
 	DebugActiveProcess(pid);
 	DebugSetProcessKillOnExit(FALSE); // we want it to keep running at end-of-TAS
 
+	// resolve pointers from versions.ini
+	//
+
+	// find timestamp in PE
+	unsigned int first_section_rel;
+	ReadProcessMemory(process, base_address + PE_SECTION_PTR, &first_section_rel, sizeof(first_section_rel), NULL);
+	ReadProcessMemory(process, base_address + first_section_rel + PE_TS_OFFSET, &game_timestamp, sizeof(game_timestamp), NULL);
+
+	// init reader
+	ini = new INIReader("versions.ini");
+	if(ini->ParseError()) {
+		_tprintf(L"Failed to load versions.ini!\n");
+		return 0;
+	}
+
+	// init timestamp
+	snprintf(timestamp_str, sizeof(timestamp_str), "%u", game_timestamp);
+	if(ini->Get(timestamp_str, "tick_code", "this is bad") == "this is bad") {
+		printf("Failed to get section %s!\n", timestamp_str);
+		return 0;
+	}
+
+	// read config
+	delta_codes = ini->GetInteger(timestamp_str, "delta_codes", 1);
+	xinput_get_state = resolve_ptr_path(ini->Get(timestamp_str, "xinput_get_state", "this is bad").c_str());
+	xinput_get_state_post = resolve_ptr_path(ini->Get(timestamp_str, "xinput_get_state_post", "this is bad").c_str());
+	tick_code = resolve_ptr_path(ini->Get(timestamp_str, "tick_code", "this is bad").c_str());
+	delta_data = resolve_ptr_path(ini->Get(timestamp_str, "delta_data", "this is bad").c_str());
+	speedrun_timer = resolve_ptr_path(ini->Get(timestamp_str, "speedrun_timer", "this is bad").c_str());
+
+	char delta_update_str[14] = "delta_updatex";
+	for(int i = 0; i < delta_codes; i++) {
+		delta_update_str[sizeof(delta_update_str) - 2] = (char)(i + 0x31); // add number to end
+		delta_update[i] = resolve_ptr_path(ini->Get(timestamp_str, delta_update_str, "this is bad").c_str());
+	}
+
 	// rand replacement
 	//
 
 	// allocate new memory
 	new_rand = VirtualAllocEx(process, NULL, 0x1000, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
 	WriteProcessMemory(process, new_rand, newrand_buf, sizeof(newrand_buf), NULL);
-	_tprintf(L"New rand at 0x%08X!\n", new_rand);
+	_tprintf(L"New rand at %p!\n", new_rand);
 
 	// make rand code writable
 	VirtualProtectEx(process, msvcr_address + RAND_CODE_OFFSET, 3, PAGE_EXECUTE_READWRITE, &old_rand_prot);
@@ -158,11 +223,11 @@ void ClearScreen() {
 BOOL WINAPI cleanup_handler(DWORD signal) {
 	if(signal == CTRL_C_EVENT) {
 		// game memory
-		WriteProcessMemory(process, base_address + TICK_CODE_OFFSET, &orig_tick, sizeof(orig_tick), NULL);
-		WriteProcessMemory(process, base_address + GET_STATE_CODE_OFFSET, &orig_xinput, sizeof(orig_xinput), NULL);
-		WriteProcessMemory(process, base_address + POST_GET_STATE_CODE_OFFSET, &orig_post_xinput, sizeof(orig_post_xinput), NULL);
-		WriteProcessMemory(process, base_address + DELTA_DATA_OFFSET, &original_delta, sizeof(original_delta), NULL); // put back a fixed delta matching the original fps setting
-		if(fps_address != NULL) WriteProcessMemory(process, fps_address, &original_fps, sizeof(original_fps), NULL); // write back original fps value
+		WriteProcessMemory(process, tick_code, &orig_tick, sizeof(orig_tick), NULL);
+		WriteProcessMemory(process, xinput_get_state, &orig_xinput, sizeof(orig_xinput), NULL);
+		WriteProcessMemory(process, xinput_get_state_post, &orig_post_xinput, sizeof(orig_post_xinput), NULL);
+		WriteProcessMemory(process, delta_data, &original_delta, sizeof(original_delta), NULL); // put back a fixed delta matching the original fps setting
+		if(fps_ptr != NULL) WriteProcessMemory(process, fps_ptr, &original_fps, sizeof(original_fps), NULL); // write back original fps value
 
 		// rand
 		WriteProcessMemory(process, msvcr_address + RAND_CODE_OFFSET, orig_rand, sizeof(orig_rand), NULL);
@@ -210,34 +275,34 @@ void play_movie() {
 
 	// main loop
 	while(true) {
-		WriteProcessMemory(process, base_address + TICK_CODE_OFFSET, &interrupt_op, sizeof(interrupt_op), NULL);
+		WriteProcessMemory(process, tick_code, &interrupt_op, sizeof(interrupt_op), NULL);
 		WaitForDebugEvent(&debug_event, INFINITE);
 
 		SuspendThread(thread);
 
 		// handle breakpoints, else tell the game to handle it by itself
 		// main tick breakpoint -- code continues under these if/else ifs
-		if(debug_event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT && debug_event.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_BREAKPOINT && debug_event.u.Exception.ExceptionRecord.ExceptionAddress == base_address + TICK_CODE_OFFSET) {
+		if(debug_event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT && debug_event.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_BREAKPOINT && debug_event.u.Exception.ExceptionRecord.ExceptionAddress == tick_code) {
 			GetThreadContext(thread, &context);
 			context.Rip -= 1;
 			SetThreadContext(thread, &context);
 		}
 		// about to call XInputGetState -- save function arguments
-		else if(started && debug_event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT && debug_event.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_BREAKPOINT && debug_event.u.Exception.ExceptionRecord.ExceptionAddress == base_address + GET_STATE_CODE_OFFSET) {
+		else if(started && debug_event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT && debug_event.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_BREAKPOINT && debug_event.u.Exception.ExceptionRecord.ExceptionAddress == xinput_get_state) {
 			GetThreadContext(thread, &context);
 			context.Rip -= 1;
 			xinput_player = context.Rcx;
 			xinput_state_address = (BYTE*)context.Rdx;
 			SetThreadContext(thread, &context);
 
-			WriteProcessMemory(process, base_address + POST_GET_STATE_CODE_OFFSET, &interrupt_op, sizeof(interrupt_op), NULL);
-			WriteProcessMemory(process, base_address + GET_STATE_CODE_OFFSET, &orig_xinput, sizeof(orig_xinput), NULL);
+			WriteProcessMemory(process, xinput_get_state_post, &interrupt_op, sizeof(interrupt_op), NULL);
+			WriteProcessMemory(process, xinput_get_state, &orig_xinput, sizeof(orig_xinput), NULL);
 			ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId, DBG_CONTINUE);
 			ResumeThread(thread);
 			continue;
 		}
 		// finished calling XInputGetState -- overwrite output with correct player input as specified in the TAS
-		else if(started && debug_event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT && debug_event.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_BREAKPOINT && debug_event.u.Exception.ExceptionRecord.ExceptionAddress == base_address + POST_GET_STATE_CODE_OFFSET) {
+		else if(started && debug_event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT && debug_event.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_BREAKPOINT && debug_event.u.Exception.ExceptionRecord.ExceptionAddress == xinput_get_state_post) {
 			GetThreadContext(thread, &context);
 			context.Rip -= 1;
 			SetThreadContext(thread, &context);
@@ -245,8 +310,8 @@ void play_movie() {
 			// write inputs
 			WriteProcessMemory(process, xinput_state_address + 4, &reports[i].gamepads[xinput_player], sizeof(state_report), NULL);
 
-			WriteProcessMemory(process, base_address + GET_STATE_CODE_OFFSET, &interrupt_op, sizeof(interrupt_op), NULL);
-			WriteProcessMemory(process, base_address + POST_GET_STATE_CODE_OFFSET, &orig_post_xinput, sizeof(orig_post_xinput), NULL);
+			WriteProcessMemory(process, xinput_get_state, &interrupt_op, sizeof(interrupt_op), NULL);
+			WriteProcessMemory(process, xinput_get_state_post, &orig_post_xinput, sizeof(orig_post_xinput), NULL);
 			ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId, DBG_CONTINUE);
 			ResumeThread(thread);
 			continue;
@@ -262,11 +327,11 @@ void play_movie() {
 		*/
 
 		old_timer_paused = timer_paused; // like in ASL
-		ReadProcessMemory(process, base_address + TIMER_OFFSET + 0x10, &timer_paused, sizeof(timer_paused), NULL); // read timer status
+		ReadProcessMemory(process, (BYTE*)speedrun_timer + 0x10, &timer_paused, sizeof(timer_paused), NULL); // read timer status
 		old_game_time = game_time; // like in ASL
-		ReadProcessMemory(process, base_address + TIMER_OFFSET + 0x34, &game_time, sizeof(game_time), NULL); // read game time
+		ReadProcessMemory(process, (BYTE*)speedrun_timer + 0x34, &game_time, sizeof(game_time), NULL); // read game time
 		old_act_time = act_time; // like in ASL
-		ReadProcessMemory(process, base_address + TIMER_OFFSET + 0x3C, &act_time, sizeof(act_time), NULL); // read act time
+		ReadProcessMemory(process, (BYTE*)speedrun_timer + 0x3C, &act_time, sizeof(act_time), NULL); // read act time
 		old_rshift_down = rshift_down; // like in ASL
 		rshift_down = (GetAsyncKeyState(VK_RSHIFT) & 0x8000) == 0x8000; // framestep
 		old_lctrl_down = lctrl_down; // like in ASL
@@ -276,8 +341,8 @@ void play_movie() {
 		// !started in the beginning should make it not evaluate all the conditions once TAS has started
 		if(!started && (meta.type == FULLGAME && game_time > 0 && (old_game_time == 0 || (!timer_paused && old_timer_paused)) || (meta.type == INDIVIDUAL && act_time > 0 && old_act_time == 0) || (meta.type == IMMEDIATE))) {
 			// write the input breakpoint on starting
-			WriteProcessMemory(process, base_address + GET_STATE_CODE_OFFSET, &interrupt_op, sizeof(interrupt_op), NULL); // code
-			WriteProcessMemory(process, base_address + POST_GET_STATE_CODE_OFFSET, &interrupt_op, sizeof(interrupt_op), NULL); // code
+			WriteProcessMemory(process, xinput_get_state, &interrupt_op, sizeof(interrupt_op), NULL); // code
+			WriteProcessMemory(process, xinput_get_state_post, &interrupt_op, sizeof(interrupt_op), NULL); // code
 
 			printf("Beginning, parsing %s... ", movie_filename);
 			reports = parse_tas(movie_filename, &meta);
@@ -290,13 +355,15 @@ void play_movie() {
 			}
 
 			// patch delta
-			WriteProcessMemory(process, base_address + DELTA_WRITE_CODE_OFFSET, nop_delta_buf, sizeof(nop_delta_buf), NULL); // code
-			WriteProcessMemory(process, base_address + DELTA_DATA_OFFSET, &desired_framerate, sizeof(desired_framerate), NULL); // data
+			for(int i = 0; i < delta_codes; i++) {
+				WriteProcessMemory(process, delta_update[i], nop_delta_buf, sizeof(nop_delta_buf), NULL); // code
+			}
+			WriteProcessMemory(process, delta_data, &desired_framerate, sizeof(desired_framerate), NULL); // data
 
 			started_time = game_time - desired_framerate; // for giving a duration at the end message, subtract a frame, as start time gets set a frame into the replay
 
 			// resolve and read current FPS value, so we can restore it at end-of-TAS
-			fps_address = resolve_ptr(base_address + FPS_PTR_OFFSET) + 0x710;
+			fps_address = (BYTE*)resolve_ptr_path(ini->Get(timestamp_str, "fps", "this is bad").c_str());
 			ReadProcessMemory(process, fps_address, &original_fps, sizeof(original_fps), NULL);
 			original_delta = 1.0 / original_fps;
 
@@ -323,7 +390,7 @@ void play_movie() {
 
 		// restart loop if it hasn't started yet
 		else if(!started) {
-			WriteProcessMemory(process, base_address + TICK_CODE_OFFSET, &orig_tick, sizeof(orig_tick), NULL);
+			WriteProcessMemory(process, tick_code, &orig_tick, sizeof(orig_tick), NULL);
 			ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId, DBG_CONTINUE);
 			ResumeThread(thread);
 			continue;
@@ -331,7 +398,7 @@ void play_movie() {
 
 		// reduces desyncs, not sure why this happens though
 		if(game_time == old_game_time) {
-			WriteProcessMemory(process, base_address + TICK_CODE_OFFSET, &orig_tick, sizeof(orig_tick), NULL);
+			WriteProcessMemory(process, tick_code, &orig_tick, sizeof(orig_tick), NULL);
 			ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId, DBG_CONTINUE);
 			ResumeThread(thread);
 			continue;
@@ -436,7 +503,7 @@ void play_movie() {
 		// increment local frame count
 		i++;
 
-		WriteProcessMemory(process, base_address + TICK_CODE_OFFSET, &orig_tick, sizeof(orig_tick), NULL); // code
+		WriteProcessMemory(process, tick_code, &orig_tick, sizeof(orig_tick), NULL); // code
 		ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId, DBG_CONTINUE);
 		ResumeThread(thread);
 
@@ -449,8 +516,8 @@ void play_movie() {
 
 	// cleanup
 	WriteProcessMemory(process, msvcr_address + RAND_CODE_OFFSET, orig_rand, sizeof(orig_rand), NULL);
-	WriteProcessMemory(process, base_address + GET_STATE_CODE_OFFSET, &orig_xinput, sizeof(orig_xinput), NULL);
-	WriteProcessMemory(process, base_address + POST_GET_STATE_CODE_OFFSET, &orig_post_xinput, sizeof(orig_post_xinput), NULL);
+	WriteProcessMemory(process, xinput_get_state, &orig_xinput, sizeof(orig_xinput), NULL);
+	WriteProcessMemory(process, xinput_get_state_post, &orig_post_xinput, sizeof(orig_post_xinput), NULL);
 	WriteProcessMemory(process, fps_address, &original_fps, sizeof(original_fps), NULL);
 
 	_tprintf(L"Done in %f!\n\n", meta.type == INDIVIDUAL ? act_time : game_time - started_time);
@@ -463,14 +530,14 @@ int main(int argc, char* argv[]) {
 		if(argv[i][0] == '-') {
 			switch(argv[i][1]) {
 				case 'r': repeat = true; break;
-				case 'l': layout_filename = argv[i] + 2; break;
+				//case 'l': layout_filename = argv[i] + 2; break;
 			}
 		}
 		else movie_filename = argv[i];
 	}
 
 	if(movie_filename == NULL) {
-		_tprintf(L"A TAS movie filename wasn't specified!\nUsage: hatTAS.exe [-r] [-l<layout.hlay>] <movie.htas>\n\nExiting...\n");
+		_tprintf(L"A TAS movie filename wasn't specified!\nUsage: hatTAS.exe [-r] <movie.htas>\n\nExiting...\n");
 		return 0;
 	}
 
@@ -502,10 +569,10 @@ int main(int argc, char* argv[]) {
 	//
 
 	// game memory
-	WriteProcessMemory(process, base_address + TICK_CODE_OFFSET, &orig_tick, sizeof(orig_tick), NULL);
-	WriteProcessMemory(process, base_address + GET_STATE_CODE_OFFSET, &orig_xinput, sizeof(orig_xinput), NULL);
-	WriteProcessMemory(process, base_address + POST_GET_STATE_CODE_OFFSET, &orig_post_xinput, sizeof(orig_post_xinput), NULL);
-	WriteProcessMemory(process, base_address + DELTA_DATA_OFFSET, &original_delta, sizeof(original_delta), NULL); // put back a fixed delta matching the original fps setting
+	WriteProcessMemory(process, tick_code, &orig_tick, sizeof(orig_tick), NULL);
+	WriteProcessMemory(process, xinput_get_state, &orig_xinput, sizeof(orig_xinput), NULL);
+	WriteProcessMemory(process, xinput_get_state_post, &orig_post_xinput, sizeof(orig_post_xinput), NULL);
+	WriteProcessMemory(process, delta_data, &original_delta, sizeof(original_delta), NULL); // put back a fixed delta matching the original fps setting
 	if(fps_address != NULL) WriteProcessMemory(process, fps_address, &original_fps, sizeof(original_fps), NULL); // write back original fps value
 
 	// rand
