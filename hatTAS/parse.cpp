@@ -107,6 +107,12 @@ input_report* parse_tas(const char* filename, tas_metadata* meta_out) {
 		if(token == NULL) continue; // line doesn't start with a number, could be blank
 		cur_frame = strtol(token, NULL, 10); // convert frame count string to an integer
 
+		// too long, issue error
+		if(cur_frame > meta_out->length) {
+			printf("Error: frame %d is bigger than the length %d!\n", cur_frame, meta_out->length);
+			return NULL;
+		}
+
 		// fill in the gap frames
 		for(int i = old_frame; i < cur_frame; i++) {
 			reports[i - 1] = tmp_report;

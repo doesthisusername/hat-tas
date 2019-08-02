@@ -18,6 +18,8 @@
 #define PE_SECTION_PTR (0x3C)
 #define PE_TS_OFFSET (0x08)
 
+#define FRAMESTEP_SLEEP 5
+
 // game pointers/addresses from config
 unsigned int game_timestamp;
 char timestamp_str[0x10];
@@ -30,6 +32,7 @@ void* delta_update[2];
 void* delta_data;
 void* speedrun_timer;
 void* fps_ptr;
+void* realtime_seconds_ptr;
 
 const BYTE nop_delta_buf[8] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
 double desired_framerate = 1.0 / 60.0; // desired delta time
@@ -265,6 +268,10 @@ void play_movie() {
 	bool lctrl_down = false;
 	bool old_lctrl_down = false;
 	bool framestepping = false;
+	int rshift_down_count = 0;
+
+	float old_realtime_seconds = NAN;
+	float realtime_seconds = NAN;
 
 	BYTE* xinput_state_address = NULL;
 
@@ -326,27 +333,43 @@ void play_movie() {
 		** main breakpoint hit!
 		*/
 
+		// timer
 		old_timer_paused = timer_paused; // like in ASL
 		ReadProcessMemory(process, (BYTE*)speedrun_timer + 0x10, &timer_paused, sizeof(timer_paused), NULL); // read timer status
 		old_game_time = game_time; // like in ASL
 		ReadProcessMemory(process, (BYTE*)speedrun_timer + 0x34, &game_time, sizeof(game_time), NULL); // read game time
 		old_act_time = act_time; // like in ASL
 		ReadProcessMemory(process, (BYTE*)speedrun_timer + 0x3C, &act_time, sizeof(act_time), NULL); // read act time
+		old_realtime_seconds = realtime_seconds; // like in ASL
+		ReadProcessMemory(process, resolve_ptr_path(ini->Get(timestamp_str, "realtime_seconds", "this is bad").c_str()), &realtime_seconds, sizeof(realtime_seconds), NULL);
+
+		// keys
 		old_rshift_down = rshift_down; // like in ASL
 		rshift_down = (GetAsyncKeyState(VK_RSHIFT) & 0x8000) == 0x8000; // framestep
 		old_lctrl_down = lctrl_down; // like in ASL
 		lctrl_down = (GetAsyncKeyState(VK_LCONTROL) & 0x8000) == 0x8000; // exit framestep
 
-		// start if fullgame type, and game timer just started/game timer just resumed, OR start if IL type, and act timer just started from zero, OR start immediately if type is immediate
-		// !started in the beginning should make it not evaluate all the conditions once TAS has started
-		if(!started && (meta.type == FULLGAME && game_time > 0 && (old_game_time == 0 || (!timer_paused && old_timer_paused)) || (meta.type == INDIVIDUAL && act_time > 0 && old_act_time == 0) || (meta.type == IMMEDIATE))) {
+		// start if:
+		// fullgame type, and realtimeseconds just went less than before (meaning it reset), 
+		// IL type, and act timer just started from zero,
+		// immediately if type is immediate
+
+		// !started in the beginning should make it not evaluate all the conditions once TAS has started (also means we don't have to be as strict about the conditions)
+		if(!started && ((meta.type == FULLGAME && (realtime_seconds < old_realtime_seconds)) || (meta.type == INDIVIDUAL && act_time > 0 && old_act_time == 0) || (meta.type == IMMEDIATE))) {
 			// write the input breakpoint on starting
 			WriteProcessMemory(process, xinput_get_state, &interrupt_op, sizeof(interrupt_op), NULL); // code
 			WriteProcessMemory(process, xinput_get_state_post, &interrupt_op, sizeof(interrupt_op), NULL); // code
 
 			printf("Beginning, parsing %s... ", movie_filename);
 			reports = parse_tas(movie_filename, &meta);
-			_tprintf(L"done!\n");
+			if(reports == NULL) {
+				printf("failed...\n");
+				break;
+			}
+			else {
+				printf("done!\n");
+			}
+
 			desired_framerate = 1.f / meta.fps;
 
 			if(meta.type == IMMEDIATE) {
@@ -370,13 +393,13 @@ void play_movie() {
 			// write the FPS value that'll be used for the TAS
 			WriteProcessMemory(process, fps_address, &meta.fps, sizeof(meta.fps), NULL);
 
-			// reset rng
+			// write rng
 			// sequence length
-			WriteProcessMemory(process, (BYTE*)new_rand + 0x1F8, &zero, sizeof(zero), NULL);
+			WriteProcessMemory(process, (BYTE*)new_rand + 0x1F8, &reports[0].aux.rand_seq_max, sizeof(reports[0].aux.rand_seq_max), NULL);
 			// sequence index
 			WriteProcessMemory(process, (BYTE*)new_rand + 0x1FC, &zero, sizeof(zero), NULL);
 			// sequence
-			WriteProcessMemory(process, (BYTE*)new_rand + 0x200, &zero, sizeof(zero), NULL);
+			WriteProcessMemory(process, (BYTE*)new_rand + 0x200, &reports[0].aux.rand_seq, (reports[0].aux.rand_seq_max + 1) * 4, NULL);
 
 			// patch to jump to new rand
 			int jump_target = (BYTE*)new_rand - (msvcr_address + RAND_CODE_OFFSET) - 5; // 5 is the length of the jmp instruction
@@ -397,7 +420,7 @@ void play_movie() {
 		}
 
 		// reduces desyncs, not sure why this happens though
-		if(game_time == old_game_time) {
+		if((!old_timer_paused && game_time == old_game_time) || (timer_paused && realtime_seconds == old_realtime_seconds)) {
 			WriteProcessMemory(process, tick_code, &orig_tick, sizeof(orig_tick), NULL);
 			ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId, DBG_CONTINUE);
 			ResumeThread(thread);
@@ -406,19 +429,29 @@ void play_movie() {
 
 		// framestep logic
 		if(framestepping || rshift_down) {
-			printf("Stepping at frame %d\n", i);
+			printf("Stepping at frame %d\n", i + 1);
 			do {
-				Sleep(5);
+				Sleep(FRAMESTEP_SLEEP);
 
 				old_rshift_down = rshift_down;
 				rshift_down = (GetAsyncKeyState(VK_RSHIFT) & 0x8000) == 0x8000; // framestep
 				old_lctrl_down = lctrl_down;
 				lctrl_down = (GetAsyncKeyState(VK_LCONTROL) & 0x8000) == 0x8000; // exit framestep
 
-				if(rshift_down) framestepping = true;
-				if(lctrl_down) framestepping = false;
+				if(rshift_down) {
+					rshift_down_count++;
+					framestepping = true;
+				}
+				else {
+					rshift_down_count = 0;
+				}
+
+				if(lctrl_down) {
+					framestepping = false;
+				}
 			}
-			while((!rshift_down || old_rshift_down) && !lctrl_down);
+			// every 15 sleeps, after 500ms
+			while((!rshift_down || old_rshift_down) && !(rshift_down_count > (500 / FRAMESTEP_SLEEP) && rshift_down_count % 15) && (!lctrl_down));
 		}
 
 		// draw layout
@@ -520,7 +553,7 @@ void play_movie() {
 	WriteProcessMemory(process, xinput_get_state_post, &orig_post_xinput, sizeof(orig_post_xinput), NULL);
 	WriteProcessMemory(process, fps_address, &original_fps, sizeof(original_fps), NULL);
 
-	_tprintf(L"Done in %f!\n\n", meta.type == INDIVIDUAL ? act_time : game_time - started_time);
+	_tprintf(L"Done in %f!\n\n", meta.type == FULLGAME ? realtime_seconds : meta.type == INDIVIDUAL ? act_time : game_time - started_time);
 }
 
 int main(int argc, char* argv[]) {
@@ -531,6 +564,7 @@ int main(int argc, char* argv[]) {
 			switch(argv[i][1]) {
 				case 'r': repeat = true; break;
 				//case 'l': layout_filename = argv[i] + 2; break;
+				// above is disabled because it's really laggy
 			}
 		}
 		else movie_filename = argv[i];
@@ -552,18 +586,39 @@ int main(int argc, char* argv[]) {
 	// parse once, for example to get correct starting condition
 	reports = parse_tas(movie_filename, &meta);
 
-	// parse layout just once
-	if(layout_filename != NULL) {
-		layout = parse_lay(layout_filename);
-	}
+	if(reports != NULL) {
+		// parse layout just once
+		if(layout_filename != NULL) {
+			layout = parse_lay(layout_filename);
+		}
 
-	_tprintf(L"Done initializing, ready!\n\n");
+		// resolve and read current FPS value, so we can restore it at end-of-TAS
+		fps_address = (BYTE*)resolve_ptr_path(ini->Get(timestamp_str, "fps", "this is bad").c_str());
+		ReadProcessMemory(process, fps_address, &original_fps, sizeof(original_fps), NULL);
+		original_delta = 1.0 / original_fps;
 
-	// main main loop
-	do {
-		play_movie();
+		// write the FPS value that'll be used for the TAS
+		WriteProcessMemory(process, fps_address, &meta.fps, sizeof(meta.fps), NULL);
+
+		desired_framerate = 1.f / meta.fps;
+
+		// patch delta
+		for(int i = 0; i < delta_codes; i++) {
+			WriteProcessMemory(process, delta_update[i], nop_delta_buf, sizeof(nop_delta_buf), NULL); // code
+		}
+		WriteProcessMemory(process, delta_data, &desired_framerate, sizeof(desired_framerate), NULL); // data
+
+		_tprintf(L"Done initializing, ready!\n\n");
+
+		// main main loop
+		do {
+			play_movie();
+		}
+		while(repeat);
 	}
-	while(repeat);
+	else {
+		printf("Failed to parse properly, quitting...\n");
+	}
 
 	// cleanup
 	//
