@@ -149,6 +149,8 @@ input_report* parse_tas(const char* filename, tas_metadata* meta_out) {
 			else if(starts_with(token, "RT")) tmp_report.gamepads[player_id].right_trigger = !negated ? 0xFF : 0;
 			else if(starts_with(token, "START")) tmp_report.gamepads[player_id].button_state ^= (-!negated ^ tmp_report.gamepads[player_id].button_state) & BTN_START;
 			else if(starts_with(token, "BACK")) tmp_report.gamepads[player_id].button_state ^= (-!negated ^ tmp_report.gamepads[player_id].button_state) & BTN_BACK;
+			else if(starts_with(token, "L3")) tmp_report.gamepads[player_id].button_state ^= (-!negated ^ tmp_report.gamepads[player_id].button_state) & BTN_LEFT_THUMB;
+			else if(starts_with(token, "R3")) tmp_report.gamepads[player_id].button_state ^= (-!negated ^ tmp_report.gamepads[player_id].button_state) & BTN_RIGHT_THUMB;
 
 			// dpad
 			else if(starts_with(token, "UP")) tmp_report.gamepads[player_id].button_state ^= (-!negated ^ tmp_report.gamepads[player_id].button_state) & BTN_DPAD_UP;
